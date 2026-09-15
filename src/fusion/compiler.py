@@ -1,14 +1,14 @@
-"""Turns a graph of ops into a single fused pass over the source."""
+"""Public compile seam. Two backends: interpreted walk, or generated code."""
 
 from . import ops
+from .codegen import compile_graph_codegen
 
 __all__ = ["compile_graph"]
 
-_SKIP = object()  # sentinel: element was filtered out
+_SKIP = object()
 
 
 def _collect_chain(terminal):
-    """Walk from terminal back to SourceOp; return (source, [steps...])."""
     chain = []
     cur = terminal
     while not isinstance(cur, ops.SourceOp):
@@ -18,12 +18,10 @@ def _collect_chain(terminal):
     return cur, chain
 
 
-def compile_graph(terminal):
-    """Compile the graph ending at `terminal` into a zero-arg callable."""
+def _compile_walk(terminal):
+    """Original walk-and-apply backend. Slower, but easier to debug."""
     source, chain = _collect_chain(terminal)
 
-    # Split the chain into (a) per-element filter/map steps and (b) the terminal reduce.
-    # A ReduceOp is only valid as the last step; anything after it is a bug.
     if not chain or not isinstance(chain[-1], ops.ReduceOp):
         raise ValueError("graph must terminate in a ReduceOp")
     reduce_op = chain[-1]
@@ -32,7 +30,6 @@ def compile_graph(terminal):
         if isinstance(step, ops.ReduceOp):
             raise ValueError("ReduceOp may only appear as the terminal op")
 
-    # Pre-bind step types so the hot loop doesn't do isinstance() per element.
     compiled_steps = []
     for step in element_steps:
         if isinstance(step, ops.FilterOp):
@@ -44,11 +41,9 @@ def compile_graph(terminal):
 
     data = source.data
     reduce_fn = reduce_op.fn
-    init = reduce_op.init
 
     def run():
-        acc = init
-        first = True
+        acc = None
         for x in data:
             val = x
             for kind, fn in compiled_steps:
@@ -56,15 +51,22 @@ def compile_graph(terminal):
                     if not fn(val):
                         val = _SKIP
                         break
-                else:  # map
+                else:
                     val = fn(val)
             if val is _SKIP:
                 continue
-            if first:
+            if acc is None:
                 acc = val
-                first = False
             else:
                 acc = reduce_fn(acc, val)
-        return acc
+        return acc if acc is not None else 0.0
 
     return run
+
+
+def compile_graph(terminal, strategy="codegen"):
+    if strategy == "codegen":
+        return compile_graph_codegen(terminal)
+    if strategy == "walk":
+        return _compile_walk(terminal)
+    raise ValueError(f"unknown strategy: {strategy!r}")
