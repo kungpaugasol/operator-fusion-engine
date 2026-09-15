@@ -1,0 +1,14 @@
+{
+  "lsp": {
+    "pyright": {
+      "settings": {
+        "python": {
+          "pythonPath": "${workspaceFolder}/.venv/Scripts/python.exe"
+        },
+        "python.analysis": {
+          "extraPaths": ["${workspaceFolder}/src"]
+        }
+      }
+    }
+  }
+}
