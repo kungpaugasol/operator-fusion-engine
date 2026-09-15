@@ -30,3 +30,23 @@ def test_map_before_filter():
     # map first, then filter: (x*10) > 25 → keep 3,4 → 30+40 = 70
     fused = Col.from_array(data).map(lambda x: x * 10).filter(lambda x: x > 25).sum()
     assert fused == 70.0
+
+def test_walk_and_codegen_agree():
+    from array import array
+    from fusion import ops
+    from fusion.compiler import compile_graph
+
+    data = array('d', [1.0, 2.0, 3.0, 4.0])
+    pred = lambda x: x > 2
+    mp = lambda x: x * 10
+
+    src = ops.SourceOp(data)
+    node = ops.ReduceOp(
+        ops.MapOp(ops.FilterOp(src, pred), mp),
+        lambda a, b: a + b,
+        0.0,
+    )
+
+    walk = compile_graph(node, strategy="walk")()
+    gen = compile_graph(node, strategy="codegen")()
+    assert walk == gen == 70.0
